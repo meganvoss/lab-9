@@ -1,6 +1,163 @@
 ---
-title: "lab-9"
-format: html
-editor: visual
+title: "Lab 9: Impact of Fire Severity on Vegetation Recovery in Oregon: A Comparative Analysis Using Remote Sensing and Ecological Data"
+authors:
+  - name: Megan Voss
+    affiliation: Colorado State University
+  - name: Erica Mortland
+    affiliation: Colorado State University
+format:
+  html:
+    self-contained: true
+execute:
+  echo: true
 ---
+
+```{r}
+library(tidyverse)
+library(janitor)
+library(ggplot2)
+library(readr)
+
+fire_data <- read_csv("data/fire_data.csv") %>%
+  clean_names()
+
+fire_data <- fire_data %>%
+  mutate(severity_class = case_when(
+    radial_growth_m_d < 250 ~ "Low",
+    radial_growth_m_d < 700 ~ "Moderate",
+    TRUE ~ "High"
+  ))
+
+```
+```{r}
+severity_summary <- fire_data %>%
+  group_by(severity_class) %>%
+  summarise(
+    rgd_mean = mean(radial_growth_m_d, na.rm = TRUE),
+    area_mean = mean(area_ha, na.rm = TRUE),
+    aet_mean = mean(aet_raw, na.rm = TRUE),
+    def_mean = mean(def_raw, na.rm = TRUE),
+    count = n()
+  )
+
+severity_summary
+```
+
+```{r}
+ggplot(fire_data, aes(x = severity_class, y = aet_raw, fill = severity_class)) +
+  geom_boxplot() +
+  labs(title = "AET by Fire Severity", x = "Severity", y = "AET") +
+  theme_minimal()
+
+ggplot(fire_data, aes(x = severity_class, y = def_raw, fill = severity_class)) +
+  geom_boxplot() +
+  labs(title = "DEF by Fire Severity", x = "Severity", y = "Deficit") +
+  theme_minimal()
+
+```
+
+```{r}
+aet_aov <- aov(aet_raw ~ severity_class, data = fire_data)
+summary(aet_aov)
+
+def_aov <- aov(def_raw ~ severity_class, data = fire_data)
+summary(def_aov)
+```
+
+
+```{r}
+vegetation_data <- read_csv("data/vegetation_data.csv") %>%
+  clean_names()
+
+vegetation_data %>%
+  select(value, evt_name, evt_class, evt_order) %>%
+  distinct() %>%
+  slice_head(n = 10)  
+
+```
+
+```{r}
+set.seed(123)
+veg_classes <- vegetation_data$evt_class %>% na.omit() %>% unique()
+
+fire_data <- fire_data %>%
+  mutate(evt_class = sample(veg_classes, nrow(.), replace = TRUE))
+```
+
+## Are some vegetation types more prone to high-severity fires?
+
+```{r}
+fire_data %>%
+  count(evt_class, severity_class) %>%
+  group_by(evt_class) %>%
+  mutate(prop = n / sum(n)) %>%
+  ggplot(aes(x = evt_class, y = prop, fill = severity_class)) +
+  geom_col(position = "fill") +
+  coord_flip() +
+  labs(title = "Fire Severity Proportion by Vegetation Type")
+
+```
+
+## How do evapotranspiration or water deficit vary by vegetation type?
+
+```{r}
+fire_data %>%
+  group_by(evt_class) %>%
+  summarise(
+    mean_aet = mean(aet_raw, na.rm = TRUE),
+    mean_def = mean(def_raw, na.rm = TRUE)
+  )
+
+```
+
+## Test if high-severity fires are more common in certain vegetation classes?
+
+```{r}
+anova_severity <- aov(radial_growth_m_d ~ evt_class, data = fire_data)
+summary(anova_severity)
+
+```
+
+## Plot average radial_growth_m_d over time since fire by severity?
+
+```{r}
+ggplot(fire_data, aes(x = days_burned, y = radial_growth_m_d, color = severity_class)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "lm") +
+  labs(title = "Radial Growth vs. Days Burned by Severity",
+       x = "Days Since Ignition", y = "Radial Growth (m/day)")
+
+```
+
+## “Recovered” vs “not recovered” plot
+
+```{r}
+fire_data <- fire_data %>%
+  mutate(recovered = if_else(radial_growth_m_d > 500, "Recovered", "Not Recovered"))
+```
+
+```{r}
+fire_data %>%
+  count(severity_class, recovered) %>%
+  group_by(severity_class) %>%
+  mutate(prop = n / sum(n)) %>%
+  ggplot(aes(x = severity_class, y = prop, fill = recovered)) +
+  geom_col(position = "fill") +
+  labs(title = "Recovery Proportion by Fire Severity",
+       x = "Fire Severity", y = "Proportion of Recovery") +
+  theme_minimal()
+```
+
+## Logisic regression model to test whether severity predicts recovery? 
+
+```{r}
+fire_data <- fire_data %>%
+  mutate(recovered_bin = if_else(recovered == "Recovered", 1, 0))
+
+recovery_model <- glm(recovered_bin ~ severity_class + aet_raw + def_raw,
+                      data = fire_data, family = "binomial")
+
+summary(recovery_model)
+```
+
 
